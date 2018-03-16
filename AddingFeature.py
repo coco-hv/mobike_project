@@ -14,9 +14,9 @@ import numpy as np
 import pandas as pd
 
 
-cache_path = './cache/'
-train_path = './train/train_0521.csv'
-test_path = './test/train_after_0521.csv'
+cache_path = '../cache/'
+train_path = '../train/train_0521.csv'
+test_path = '../test/train_after_0521.csv'
 flag = True
 
 

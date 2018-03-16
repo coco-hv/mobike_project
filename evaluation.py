@@ -9,10 +9,10 @@ import os
 import pickle
 
 
-train_path = './train/train.csv'
-cache_path = './cache/'
+train_path = '../train/train.csv'
+cache_path = '../cache/'
 result_path = cache_path + 'true.pkl'
-result=pd.read_csv('./result/result.csv')
+result=pd.read_csv('../result/result.csv')
 
 
 if os.path.exists(result_path):
