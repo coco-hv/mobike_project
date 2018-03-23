@@ -8,6 +8,7 @@
 
 
 import os
+import sys
 import gc
 import time
 import pickle
@@ -15,7 +16,10 @@ import Geohash
 import numpy as np
 import datetime
 import pandas as pd
-
+from xgboost import plot_importance
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib import pyplot
 
 cache_path = '../cache/'
 train_path = '../train/train_0521.csv'
@@ -108,6 +112,17 @@ def get_user_eloc_distance_stat(train,result):
     result = pd.merge(result, user_eloc_manhattan, on=['userid', 'geohashed_end_loc'], how='left')
     return result
 
+# 获取用户从候选地出发的平均小时
+def get_user_eloc_hour(train, result):
+    user_eloc_hour = train.groupby(['userid','geohashed_end_loc'],as_index=False)['hour'].agg({'user_eloc_average_hour':'mean'})
+    result = pd.merge(result,user_eloc_hour,on=['userid','geohashed_end_loc'],how='left')
+    return result
+
+# 获取用户从出发地出发的平均小时
+def get_user_sloc_hour(train, result):
+    user_sloc_hour = train.groupby(['userid','geohashed_start_loc'],as_index=False)['hour'].agg({'user_sloc_average_hour':'mean'})
+    result = pd.merge(result,user_sloc_hour,on=['userid','geohashed_start_loc'],how='left')
+    return result
 
 ########################################################################
 #                                                                      #
@@ -195,6 +210,16 @@ def get_latlon(result):
 
     result['eloc_sloc_lat_sub'] = result['eloc_lat'] - result['sloc_lat']
     result['eloc_sloc_lon_sub'] = result['eloc_lon'] - result['sloc_lon']
+    return result
+
+def get_eloc_hour(train,result):
+    eloc_time = train.groupby('geohashed_end_loc', as_index=False)['hour'].agg({'eloc_average_hour': 'mean'})
+    result = pd.merge(result, eloc_time, on='geohashed_end_loc', how='left')
+    return result
+
+def get_sloc_hour(train,result):
+    sloc_time = train.groupby('geohashed_start_loc', as_index=False)['hour'].agg({'sloc_average_hour': 'mean'})
+    result = pd.merge(result, sloc_time, on='geohashed_start_loc', how='left')
     return result
 
 ########################################################################
@@ -420,6 +445,7 @@ def make_train_set(train,test):
     print('成功获取与最常去地点间距离!')
     
     train = get_distance(train)
+    train = get_weekday_hour(train)
     gc.collect()
     result = get_user_count(train,result)                                   # 获取用户历史行为次数
     result = get_user_eloc_count(train, result)                             # 获取用户去过这个地点几次
@@ -443,10 +469,15 @@ def make_train_set(train,test):
     result = get_user_sloc_distance_stat(train, result)
     result = get_user_eloc_distance_stat(train,result)
     print('1 done!')
-    #result = get_bike_eloc_count(train, result)  # 获取获取该单车去过该地的次数
+    result = get_bike_eloc_count(train, result)  # 获取获取该单车去过该地的次数
     result['dist_user_most_eloc_eloc'] = dist_most['distance']
     result['mdist_user_most_eloc_eloc'] = dist_most['manhattan']
     result = get_latlon(result)
+    
+    result = get_user_eloc_hour(train, result)
+    result = get_user_sloc_hour(train, result)
+    result = get_eloc_hour(train,result)
+    result = get_sloc_hour(train,result)
     print('result.columns:\n{}'.format(result.columns))
 
     print('添加真实label')
@@ -470,7 +501,7 @@ if __name__ == "__main__":
 
     print('构造训练集')
     #train_feat = make_train_set(train1,train2)
-    # train_feat.to_csv(train_feat_path,index = False, header= True)
+    #train_feat.to_csv(train_feat_path,index = False, header= True)
     train_feat = pd.read_csv(train_feat_path)
     train_feat['weekend'] = 1
     train_feat.loc[train_feat['weekday'] < 5,'weekend'] =0
@@ -501,21 +532,47 @@ if __name__ == "__main__":
 
 
     import xgboost as xgb
-    predictors = [ 'biketype','user_count','user_eloc_count','user_sloc_count','user_sloc_eloc_count','user_eloc_sloc_count',
-                   'distance','eloc_count','sloc_count','weekday','hour',
-                   'unique_user_eloc_as_sloc_count','unique_user_eloc_count','user_eloc_rate','user_eloc_sloc_rate',
-                   'user_sloc2eloc_rate','manhattan','dist_user_most_eloc_eloc','mdist_user_most_eloc_eloc',
-                   'eloc_average_distance','sloc_average_distance',
-                   'user_average_distance','user_max_distance','user_min_distance',
-                   'user_average_manhattan','user_max_manhattan','user_min_manhattan',
-                   'user_sloc_max_distance', 'user_sloc_min_distance', 'user_sloc_average_distance',
-                   'user_sloc_max_manhattan', 'user_sloc_min_manhattan', 'user_sloc_average_manhattan',
-                   'user_eloc_max_distance', 'user_eloc_min_distance', 'user_eloc_average_distance',
-                   'user_eloc_max_manhattan', 'user_eloc_min_manhattan', 'user_eloc_average_manhattan',
-                   'eloc_lat','eloc_lon','sloc_lat','sloc_lon','eloc_sloc_lat_sub','eloc_sloc_lon_sub'
-                   ,'weekend',
-                   ]
-
+    #args = sys.argv[1]
+    #predictors = args.split(',')
+    #print predictors
+    predictors = [ 
+                    
+                    'user_count','user_eloc_count','user_sloc_count'
+                    ,'user_sloc_eloc_count','user_eloc_sloc_count','dist_user_most_eloc_eloc'
+                    ,'mdist_user_most_eloc_eloc','user_eloc_rate','user_eloc_sloc_rate'
+                    ,'user_sloc2eloc_rate','user_sloc_rate','user_average_distance'
+                    ,'user_max_distance','user_min_distance','user_average_manhattan'
+                    ,'user_max_manhattan','user_min_manhattan','user_sloc_max_distance'
+                    ,'user_sloc_min_distance','user_sloc_average_distance','user_sloc_max_manhattan'
+                    ,'user_sloc_min_manhattan','user_sloc_average_manhattan','user_eloc_max_distance'
+                    ,'user_eloc_min_distance','user_eloc_average_distance','user_eloc_max_manhattan'
+                    ,'user_eloc_min_manhattan','user_eloc_average_manhattan','user_eloc_average_hour'
+                    ,'user_sloc_average_hour','eloc_count','sloc_count'
+                    ,'eloc_lat','eloc_lon','eloc_sloc_lat_sub'
+                    ,'sloc_lat','sloc_lon','eloc_sloc_lon_sub'
+                    ,'unique_user_eloc_as_sloc_count','unique_user_eloc_count','eloc_as_sloc_count'
+                    ,'distance','manhattan','eloc_average_distance'
+                    ,'sloc_average_distance','eloc_average_hour','sloc_average_hour'
+                    ,'weekday','hour','weekend'
+                    ,'biketype','bike_eloc_count'
+                ]
+                    
+                   
+                    #'biketype','user_count','user_eloc_count','user_sloc_count','user_sloc_eloc_count','user_eloc_sloc_count',
+                    #'distance','eloc_count','sloc_count','eloc_as_sloc_count','weekday','hour',
+                    #'unique_user_eloc_as_sloc_count','unique_user_eloc_count','bike_eloc_count','user_eloc_rate','user_eloc_sloc_rate',
+                    #'user_sloc_rate','user_sloc2eloc_rate','manhattan','dist_user_most_eloc_eloc','mdist_user_most_eloc_eloc',
+                    #'eloc_average_distance','sloc_average_distance',
+                    #'user_average_distance','user_max_distance' ,'user_min_distance',
+                    #'user_average_manhattan','user_max_manhattan'
+                    #,'user_min_manhattan',
+                    #'user_sloc_max_distance', 'user_sloc_min_distance', 'user_sloc_average_distance',
+                    #'user_sloc_max_manhattan', 'user_sloc_min_manhattan', 'user_sloc_average_manhattan',
+                    #'user_eloc_max_distance', 'user_eloc_min_distance', 'user_eloc_average_distance',
+                    #'user_eloc_max_manhattan', 'user_eloc_min_manhattan', 'user_eloc_average_manhattan',
+                    #'eloc_lat','eloc_lon','sloc_lat','sloc_lon','eloc_sloc_lat_sub','eloc_sloc_lon_sub'
+                    #,'weekend','user_eloc_average_hour','user_sloc_average_hour','eloc_average_hour','sloc_average_hour'
+                  # ]
 
                    #'bike_eloc_count','user_sloc_rate','eloc_as_sloc_count'
                    
@@ -535,7 +592,8 @@ if __name__ == "__main__":
         'eval_metric': 'auc',
         'scale_pos_weight': 10,
         'seed': 201703,
-        'missing':-1
+        'missing':-1,
+        'silent':1
         }
 
     xgbtrain = xgb.DMatrix(train_feat[predictors], train_feat['label'])
@@ -558,6 +616,17 @@ if __name__ == "__main__":
     result.fillna('0',inplace=True)
     result.columns=['orderid','cand1','cand2','cand3']
     result.to_csv('../result/result.csv',index=False,header=True)
+    print('重要性排名：')
+    fig, ax = pyplot.subplots(figsize=(18,18))
+    xgb.plot_importance(model, max_num_features=50, height=0.8, ax=ax)
+    pyplot.savefig("importance.png")
     print('一共用时{}秒'.format(time.time()-t0))
-
+    print('用到{}个特征:'.format(len(predictors)))
+    print(predictors)
+    exit(len(predictors))
+    #os.environ['pre']=str(predictors)
+    #os.environ['len']=str(len(predictors))
+    #os.system("echo '共$len个参数'")
+    #os.system("echo '$pre'")
+    #return predictors,len(predictors)
 
